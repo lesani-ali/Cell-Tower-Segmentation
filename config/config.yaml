@@ -1,0 +1,31 @@
+############### All models and their configurations are defined here
+models:
+  saliency:
+    mode: "base"
+    device: "cuda:0"
+  depth: 
+    ckpt: "LiheYoung/depth_anything_vitl14"
+    device: "cuda:0"
+  object_detection:
+    ckpt: "./ckpts/groundingdino_swint_ogc.pth"
+    config_path: "./src/seg_cell_tower/third_party_models/GroundingDINO/groundingdino/config/GroundingDINO_SwinT_OGC.py"
+    text_prompt: "small bright rectangles attached to tower" # Input text prompt for multi modal object detection
+    box_threshold: 0.14 # Inputs to object detection model
+    text_threshold: 0.25 # Inputs to object detection model
+    device: "cuda:0"
+  segmentation:
+    ckpt: "./ckpts/sam_vit_h_4b8939.pth"
+    model_type: "vit_h"
+    device: "cuda:0"
+
+
+recover_info_threshold: 140 # This is a depth threshold: Any pixel having depth value greater than this threshold will be considered as recoverable information
+ignore_info_threshold: 80 # This is a depth threshold: Any pixel having depth value greater than this threshold will be considered as recoverable information
+
+
+log_dir: "./logs"
+
+
+
+
+

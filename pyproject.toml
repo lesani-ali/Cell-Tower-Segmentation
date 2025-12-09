@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "seg-cell-tower"
+version = "0.1.0"
+description = "Cell Tower Segmentation Project"
+authors = [
+    {name = "Ali Lesani", email = "lesani.sh.ali@gmail.com"}
+]
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    # PyTorch
+    "torch==2.4.1",
+    "torchaudio==2.4.1",
+    "torchvision==0.19.1",
+
+    # Standard PyPI packages
+    "matplotlib==3.7.5",
+    "numpy==1.24.4",
+    "opencv-python==4.11.0.86",
+    "pandas==2.0.3",
+    "pillow==10.2.0",
+    "pydantic==2.10.6",
+    "pydantic-core==2.27.2",
+    "scikit-image==0.21.0",
+    "scipy==1.10.0",
+    "tqdm==4.67.1",
+
+    # Hugging Face
+    "huggingface-hub==0.28.1",
+    "transformers==4.45.0",
+
+    # GitHub dependencies
+    # "clip @ git+https://github.com/openai/CLIP.git@dcba3cb2e2827b402d2701e7e1c7d9fed8a20ef1",
+    "segment-anything @ git+https://github.com/facebookresearch/segment-anything.git@dca509fe793f601edb92606367a655c15ac00fdf",
+    "transparent-background @ git+https://github.com/plemeri/transparent-background.git@86fe25d320b14d1e7ca5bb0937e2e29760ba344d",
+]
+
+[project.scripts]
+segct = "seg_cell_tower.main:main"
+
+[tool.setuptools.packages.find]
+# Package directory
+where = ["src"]
+
+[tool.setuptools.package-dir]
+# Root package directory
+"" = "src"
