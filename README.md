@@ -13,13 +13,10 @@ The pipeline combines:
 
 - **Saliency-based foreground extraction**  
   Using [Transparent Background](https://github.com/plemeri/transparent-background) to suppress irrelevant background objects.
-
 - **Monocular depth estimation**  
   Using [Depth Anything](https://github.com/LiheYoung/Depth-Anything) to recover missing foreground pixels and isolate tower components based on depth cues.
-
 - **Open-vocabulary detection**  
   Using [Grounding DINO](https://github.com/IDEA-Research/GroundingDINO) to localize antennas and radios via text prompts.
-
 - **High-quality component segmentation**  
   Using [Segment Anything (SAM)](https://github.com/facebookresearch/segment-anything) to produce refined instance-level masks.
 
