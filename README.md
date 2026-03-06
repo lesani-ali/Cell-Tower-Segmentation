@@ -209,10 +209,10 @@ If you use SDG-SAM in your research, please cite:
 
 ```bibtex
 @misc{sdg-sam2025,
-    author = {Lesani, Ali and Yeum, Chul Min},
-    title = {SDG-SAM: Salient-Depth-Grounded SAM for Robust Cell Tower Component Segmentation},
-    year = {2025},
-    url = {https://github.com/lesani-ali/Cell-Tower-Segmentation}
+    author={Lesani, Ali and Yeum, Chul Min},
+    title={SDG-SAM: Salient-Depth-Grounded SAM for Robust Cell Tower Component Segmentation},
+    year={2025},
+    url={https://github.com/lesani-ali/Cell-Tower-Segmentation}
 }
 ```
 
