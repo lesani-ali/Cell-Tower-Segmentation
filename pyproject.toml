@@ -40,7 +40,7 @@ dependencies = [
 ]
 
 [project.scripts]
-segct = "seg_cell_tower.main:main"
+segct = "seg_cell_tower.cli.run:main"
 
 [tool.setuptools.packages.find]
 # Package directory
