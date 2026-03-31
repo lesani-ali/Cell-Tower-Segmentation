@@ -59,7 +59,7 @@ class SegmentationPipeline:
         input_img_dir: str,
         output_img_dir: str,
         output_mask_dir: str,
-        gt_dir: Optional[str] = None,
+        gt_path: Optional[str] = None,
         output_report: Optional[str] = None,
     ) -> None:
         """
@@ -69,10 +69,10 @@ class SegmentationPipeline:
         os.makedirs(output_mask_dir, exist_ok=True)
 
         evaluator = None
-        if gt_dir:
+        if gt_path:
             from ..evaluation.evaluator import Eval
-            evaluator = Eval(gt_dir=gt_dir, output_report=output_report)
-            logger.info(f"Evaluation enabled — GT dir: {gt_dir}")
+            evaluator = Eval(gt_path=gt_path, output_report=output_report)
+            logger.info(f"Evaluation enabled — GT path: {gt_path}")
 
         input_imgs = sorted(os.listdir(input_img_dir))
         total_images = len(input_imgs)
@@ -88,10 +88,10 @@ class SegmentationPipeline:
             in_img = load_image(img_path)
 
             # Inference
-            masks = self(in_img)
+            output = self(in_img)
 
             # Build combined mask image (H×W, values 0 or 255)
-            rgb_mask, binary_mask = get_mask_img(masks)
+            rgb_mask = get_mask_img(output["masks"], random_color=True)
             output_mask = Image.fromarray((rgb_mask * 255).astype(np.uint8))
 
             # Save mask
@@ -107,7 +107,7 @@ class SegmentationPipeline:
 
             # Evaluation — compare saved mask against GT
             if evaluator:
-                evaluator.update(binary_mask, filename)
+                evaluator.update(output, filename)
 
         # Print + save full evaluation report
         if evaluator is not None:

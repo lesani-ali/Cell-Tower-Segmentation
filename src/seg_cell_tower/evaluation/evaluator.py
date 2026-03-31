@@ -1,6 +1,7 @@
+import json
 import os
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -9,230 +10,355 @@ from ..logging import get_logger
 
 logger = get_logger(__name__)
 
-CLASS_NAMES = ["background", "antenna"]
-NUM_CLASSES = len(CLASS_NAMES)
+# IoU thresholds for mAP@[0.5:0.95]
+IOU_THRESHOLDS = np.arange(0.50, 1.00, 0.05)   # [0.50, 0.55, …, 0.95]
+
+def _poly_to_mask(segmentation: list, height: int, width: int) -> np.ndarray:
+    """Rasterize a COCO polygon segmentation to a binary (bool) mask."""
+    mask = np.zeros((height, width), dtype=np.uint8)
+    for poly in segmentation:
+        pts = np.array(poly, dtype=np.float32).reshape(-1, 1, 2)
+        cv2.fillPoly(mask, [pts.astype(np.int32)], 1)
+    return mask.astype(bool)
 
 
-def _load_mask(path: str) -> np.ndarray:
-    """Load a mask image as a 2-D binary uint8 array (non-zero = foreground)."""
-    img = cv2.imread(path)
-    return (img.sum(axis=-1) > 0).astype(np.uint8)
+def _pairwise_iou(pred_masks: np.ndarray, gt_masks: np.ndarray) -> np.ndarray:
+    """
+    Compute pairwise IoU between M predicted masks and N GT masks.
+
+    Strategy: loop over M predictions, broadcast against all N GT masks at
+    once. This keeps peak memory to O(N * H * W) rather than O(M * N * H * W).
+
+    Args:
+        pred_masks (np.ndarray): (M, H, W) bool
+        gt_masks (np.ndarray): (N, H, W) bool
+
+    Returns:
+        np.ndarray: (M, N) float32 IoU matrix
+    """
+    M, N = len(pred_masks), len(gt_masks)
+    if M == 0 or N == 0:
+        return np.zeros((M, N), dtype=np.float32)
+
+    gt_areas = gt_masks.sum(axis=(1, 2)).astype(np.float32)   # (N,)
+    iou_matrix = np.zeros((M, N), dtype=np.float32)
+
+    for i in range(M):
+        inter = np.logical_and(pred_masks[i], gt_masks).sum(axis=(1, 2)).astype(np.float32)  # (N,)
+        union = float(pred_masks[i].sum()) + gt_areas - inter
+        iou_matrix[i] = inter / np.maximum(union, 1e-7)
+
+    return iou_matrix
 
 
-def _fmt(v: float) -> str:
-    return f"{v:.4f}" if not np.isnan(v) else "  N/A"
+def _greedy_match(
+    pred_scores: np.ndarray,
+    iou_matrix: np.ndarray,
+    iou_thresh: float = 0.5,
+) -> Tuple[np.ndarray, List[float]]:
+    """
+    Greedy matching: highest-confidence prediction first.
+
+    Args:
+        pred_scores (np.ndarray): (M,) confidence scores.
+        iou_matrix (np.ndarray): (M, N) IoU values.
+        iou_thresh (float): IoU threshold for a valid match.
+
+    Returns:
+        is_tp (np.ndarray): (M,) bool — which predictions are TPs.
+        matched_ious (list[float]): IoU value of each matched pair.
+    """
+    M, N = iou_matrix.shape
+    order = np.argsort(-pred_scores)          # descending score
+    is_tp = np.zeros(M, dtype=bool)
+    matched_gt = np.zeros(N, dtype=bool)
+    matched_ious = []
+
+    for orig_idx in order:
+        row = iou_matrix[orig_idx].copy()
+        row[matched_gt] = -1.0               # mask already-matched GT
+        best_gt = int(np.argmax(row))
+
+        if row[best_gt] >= iou_thresh:
+            is_tp[orig_idx] = True
+            matched_gt[best_gt] = True
+            matched_ious.append(float(iou_matrix[orig_idx, best_gt]))
+
+    return is_tp, matched_ious
 
 
-def _fmt_meanstd(mean: float, std: float) -> str:
-    return f"{mean:.4f} ± {std:.4f}"
+def _compute_ap_101(scores: np.ndarray, is_tp: np.ndarray, n_gt: int) -> float:
+    """
+    Compute Average Precision using 101-point COCO interpolation.
+
+    Args:
+        scores (np.ndarray): (K,) prediction scores.
+        is_tp (np.ndarray): (K,) bool TP flags.
+        n_gt (int): total GT instances.
+
+    Returns:
+        float: AP value (NaN if no GT).
+    """
+    if n_gt == 0:
+        return float("nan")
+    if len(scores) == 0:
+        return 0.0
+
+    order = np.argsort(-scores)
+    tp_cum = np.cumsum(is_tp[order].astype(float))
+    fp_cum = np.cumsum((~is_tp[order]).astype(float))
+
+    precision = tp_cum / (tp_cum + fp_cum)  
+    recall = tp_cum / n_gt
+
+    # 101-point interpolation (COCO standard)
+    ap = 0.0
+    for thr in np.linspace(0.0, 1.0, 101):
+        mask = recall >= thr
+        ap += precision[mask].max() if mask.any() else 0.0
+    return ap / 101.0
 
 
 class Eval:
+    """
+    COCO-style instance segmentation evaluator.
 
-    def __init__(self, gt_dir: str, output_report: Optional[str] = None) -> None:
-        self.gt_dir = Path(gt_dir)
+    Metrics:
+        AP@0.5, AP@0.75, mAP@[0.5:0.95],
+        Precision@0.5, Recall@0.5, Mean matched mask IoU@0.5
+
+    Args:
+        gt_path (str): Path to the COCO-format annotation JSON.
+        output_report (str | None): Optional path to save the text report.
+    """
+
+    def __init__(self, gt_path: str, output_report: Optional[str] = None) -> None:
+        self.gt_path = Path(gt_path)
         self.output_report = output_report
 
-        # Global confusion matrix (accumulated across all images)
-        self.confusion_matrix = np.zeros((NUM_CLASSES, NUM_CLASSES), dtype=np.int64)
-
-        # Per-image IoU and Dice lists (one entry per class per image)
-        self._per_image_iou: List[np.ndarray] = []   # each: shape (NUM_CLASSES,)
-        self._per_image_dice: List[np.ndarray] = []
-
+        # Per-image accumulated data: (pred_scores (M,), iou_matrix (M,N), n_gt)
+        self._data: List[Tuple[np.ndarray, np.ndarray, int]] = []
         self._processed = 0
 
-        if not self.gt_dir.exists():
-            logger.warning(f"GT directory not found: {self.gt_dir} — evaluation disabled.")
+        # GT index: filename → {height, width, annotations[]}
+        self._gt: Dict[str, dict] = {}
+        self._load_gt()
 
-    def update(self, pred: np.ndarray, image_name: str) -> None:
+    def _load_gt(self) -> None:
+        if not self.gt_path.exists():
+            logger.warning(f"GT JSON not found: {self.gt_path} — evaluation disabled.")
+            return
+
+        with open(self.gt_path) as f:
+            data_json = json.load(f)
+
+        ann_by_img: Dict[int, list] = {}
+        for ann in data_json["annotations"]:
+            ann_by_img.setdefault(ann["image_id"], []).append(ann)
+
+        for img_info in data_json["images"]:
+            self._gt[img_info["file_name"]] = {
+                "height": img_info["height"],
+                "width": img_info["width"],
+                "anns": ann_by_img.get(img_info["id"], []),
+            }
+
+        n_ann = sum(len(v["anns"]) for v in self._gt.values())
+        logger.info(
+            f"GT loaded: {len(self._gt)} images, {n_ann} instances from {self.gt_path.name}"
+        )
+
+    def _get_gt_masks(self, image_name: str) -> Optional[np.ndarray]:
         """
-        Accumulate one predicted mask into the confusion matrix and per-image lists.
+        Rasterize GT polygons for an image.
 
         Args:
-            pred (np.ndarray): 2-D mask array (non-zero = antenna).
-            image_name (str): Filename used to locate the matching GT mask.
+            image_name (str): Filename (with extension) of the query image.
+
+        Returns:
+            np.ndarray | None: (N, H, W) bool, or None if GT not found.
         """
-        if not self.gt_dir.exists():
-            return
-
-        gt_path = self._find_gt(Path(image_name).stem)
-        if gt_path is None:
-            logger.warning(f"No GT mask found for '{image_name}' in {self.gt_dir}")
-            return
-
-        gt = _load_mask(str(gt_path))
-
-        if pred.shape != gt.shape:
-            logger.warning(f"[{image_name}] shape mismatch — resizing prediction to {gt.shape}.")
-            from PIL import Image
-            pred = np.array(
-                Image.fromarray(pred.astype(np.uint8)).resize(
-                    (gt.shape[1], gt.shape[0]), resample=0
-                ),
-                dtype=np.uint8,
+        info = self._gt.get(image_name)
+        if info is None:
+            # Fall back: match by stem
+            stem = Path(image_name).stem
+            info = next(
+                (v for k, v in self._gt.items() if Path(k).stem == stem), None
             )
+        if info is None:
+            return None
 
-        pred_flat = pred.flatten().astype(int)
-        target_flat = gt.flatten().astype(int)
+        H, W, anns = info["height"], info["width"], info["anns"]
+        if not anns:
+            return np.zeros((0, H, W), dtype=bool)
 
-        # Filter out invalid / ignore labels (e.g., 255)
-        mask = (target_flat >= 0) & (target_flat < NUM_CLASSES)
+        return np.stack(
+            [_poly_to_mask(ann["segmentation"], H, W) for ann in anns], axis=0
+        )
 
-        hist = np.bincount(
-            NUM_CLASSES * target_flat[mask] + pred_flat[mask],
-            minlength=NUM_CLASSES ** 2,
-        ).reshape(NUM_CLASSES, NUM_CLASSES)
+    def update(self, output: dict, image_name: str) -> None:
+        """
+        Accumulate predictions for one image.
 
-        # Accumulate global confusion matrix
-        self.confusion_matrix += hist
+        Args:
+            output (dict): Keys "masks" (M, H, W) bool, "scores" (M,) float.
+            image_name (str): Filename used to look up GT in the JSON.
+        """
+        if not self.gt_path.exists():
+            return
 
-        # Compute and store per-image IoU & Dice from this image's histogram
-        tp = np.diag(hist).astype(float)
-        fp = hist.sum(axis=0).astype(float) - tp
-        fn = hist.sum(axis=1).astype(float) - tp
+        pred_masks = output.get("masks", np.empty((0, 0, 0), dtype=bool))
+        pred_scores = np.asarray(output.get("scores", []), dtype=np.float32)
 
-        iou_img = tp / np.maximum(tp + fp + fn, 1e-7)
-        dice_img = (2 * tp) / np.maximum(2 * tp + fp + fn, 1e-7)
+        gt_masks = self._get_gt_masks(image_name)
+        if gt_masks is None:
+            logger.warning(f"No GT found for '{image_name}' — skipping.")
+            return
 
-        self._per_image_iou.append(iou_img)
-        self._per_image_dice.append(dice_img)
+        n_gt = len(gt_masks)
+
+        # Resize predictions to match GT resolution if needed
+        if len(pred_masks) > 0 and n_gt > 0:
+            ph, pw = pred_masks.shape[1], pred_masks.shape[2]
+            gh, gw = gt_masks.shape[1], gt_masks.shape[2]
+            if (ph, pw) != (gh, gw):
+                logger.warning(
+                    f"[{image_name}] pred size {(ph,pw)} ≠ GT size {(gh,gw)}, resizing."
+                )
+                pred_masks = np.stack([
+                    cv2.resize(m.astype(np.uint8), (gw, gh),
+                               interpolation=cv2.INTER_NEAREST).astype(bool)
+                    for m in pred_masks
+                ], axis=0)
+
+        # Compute pairwise IoU (M, N) — store only this small matrix
+        iou_matrix = _pairwise_iou(pred_masks, gt_masks)
+
+        self._data.append((pred_scores, iou_matrix, n_gt))
         self._processed += 1
 
     def compute(self) -> dict:
         """
-        Compute all metrics from the accumulated confusion matrix and per-image lists.
+        Compute all instance segmentation metrics from accumulated data.
+
+        Returns:
+            dict: ap50, ap75, map, precision50, recall50, mean_iou50.
         """
-        tp = np.diag(self.confusion_matrix).astype(float)
-        fp = self.confusion_matrix.sum(axis=0).astype(float) - tp
-        fn = self.confusion_matrix.sum(axis=1).astype(float) - tp
+        total_gt = sum(n for _, _, n in self._data)
 
-        # Global metrics (from accumulated totals)
-        iou_per_class = tp / np.maximum(tp + fp + fn, 1e-7)
-        dice_per_class = (2 * tp) / np.maximum(2 * tp + fp + fn, 1e-7)
-        precision_per_class = tp / np.maximum(tp + fp, 1e-7)
-        recall_per_class = tp / np.maximum(tp + fn, 1e-7)
+        ap_per_thresh: List[float] = []
 
-        # Per-image statistics (mean ± std across images, per class)
-        img_iou = np.stack(self._per_image_iou, axis=0)   # (N, NUM_CLASSES)
-        img_dice = np.stack(self._per_image_dice, axis=0)   # (N, NUM_CLASSES)
+        # Collect per-threshold data; also keep @0.5 for precision/recall/iou
+        all_scores_50: List[float] = []
+        all_is_tp_50:  List[bool]  = []
+        matched_ious_50: List[float] = []
 
-        iou_mean_per_class = img_iou.mean(axis=0)
-        iou_std_per_class = img_iou.std(axis=0)
-        dice_mean_per_class = img_dice.mean(axis=0)
-        dice_std_per_class = img_dice.std(axis=0)
+        for t_idx, iou_thresh in enumerate(IOU_THRESHOLDS):
+            scores_all: List[float] = []
+            is_tp_all:  List[bool]  = []
+            n_gt_total = 0
+
+            for pred_scores, iou_matrix, n_gt in self._data:
+                n_gt_total += n_gt
+                M = len(pred_scores)
+
+                if M == 0:
+                    continue
+
+                if n_gt == 0:
+                    # All predictions are FP
+                    scores_all.extend(pred_scores.tolist())
+                    is_tp_all.extend([False] * M)
+                    continue
+
+                is_tp, matched = _greedy_match(pred_scores, iou_matrix, iou_thresh)
+                scores_all.extend(pred_scores.tolist())
+                is_tp_all.extend(is_tp.tolist())
+
+                if t_idx == 0:   # threshold == 0.5
+                    matched_ious_50.extend(matched)
+
+            if t_idx == 0:
+                all_scores_50 = scores_all[:]
+                all_is_tp_50  = is_tp_all[:]
+
+            ap = _compute_ap_101(
+                np.array(scores_all, dtype=np.float32),
+                np.array(is_tp_all, dtype=bool),
+                n_gt_total,
+            )
+            ap_per_thresh.append(ap)
+
+        # mAP over valid thresholds
+        valid = [v for v in ap_per_thresh if not np.isnan(v)]
+        map_score = float(np.mean(valid)) if valid else float("nan")
+
+        ap50 = ap_per_thresh[0]    # index 0 → thresh 0.50
+        ap75 = ap_per_thresh[5]    # index 5 → thresh 0.75
+
+        # Precision and Recall @0.5
+        if all_scores_50:
+            t = np.array(all_is_tp_50, dtype=bool)
+            cum_tp = float(t.sum())
+            cum_fp = float((~t).sum())
+            precision50 = cum_tp / max(cum_tp + cum_fp, 1e-7)
+            recall50 = cum_tp / max(total_gt, 1e-7)
+        else:
+            precision50 = recall50 = float("nan")
+
+        mean_iou50 = float(np.mean(matched_ious_50)) if matched_ious_50 else float("nan")
 
         return {
-            # Global
-            "iou_per_class": iou_per_class,
-            "dice_per_class": dice_per_class,
-            "precision_per_class": precision_per_class,
-            "recall_per_class": recall_per_class,
-            "miou": float(np.mean(iou_per_class)),
-            "mdice": float(np.mean(dice_per_class)),
-            "mprecision": float(np.mean(precision_per_class)),
-            "mrecall": float(np.mean(recall_per_class)),
-            # Per-image mean ± std
-            "iou_mean_per_class": iou_mean_per_class,
-            "iou_std_per_class": iou_std_per_class,
-            "dice_mean_per_class": dice_mean_per_class,
-            "dice_std_per_class": dice_std_per_class,
+            "ap50": float(ap50),
+            "ap75": float(ap75),
+            "map": map_score,
+            "precision50": precision50,
+            "recall50": recall50,
+            "mean_iou50": mean_iou50,
         }
 
     def reset(self) -> None:
         """Reset all accumulators."""
-        self.confusion_matrix[:] = 0
-        self._per_image_iou.clear()
-        self._per_image_dice.clear()
+        self._data.clear()
         self._processed = 0
 
     def finalize(self) -> None:
-        """
-        Compute final metrics, print results, and save report.
-        """
+        """Compute final metrics, print results, and optionally save report."""
         if self._processed == 0:
             logger.warning("Eval: no images were evaluated.")
             return
 
         stats = self.compute()
         self._log(stats)
-
         if self.output_report:
             self._save(stats, self.output_report)
 
+    def _report_lines(self, stats: dict) -> List[str]:
+        w = 30
+        return [
+            f"  {'AP@0.5':<{w}}: {stats['ap50']:0.4f}",
+            f"  {'AP@0.75':<{w}}: {stats['ap75']:0.4f}",
+            f"  {'mAP@[0.5:0.95]':<{w}}: {stats['map']:0.4f}",
+            f"  {'Precision@0.5':<{w}}: {stats['precision50']:0.4f}",
+            f"  {'Recall@0.5':<{w}}: {stats['recall50']:0.4f}",
+            f"  {'Mean Matched IoU@0.5':<{w}}: {stats['mean_iou50']:0.4f}",
+        ]
+
     def _log(self, stats: dict) -> None:
-        sep = "=" * 56
+        sep = "=" * 50
         logger.info(f"\n{sep}")
-        logger.info(f"  Evaluation Results  ({self._processed} images)")
+        logger.info(f"  Instance Segmentation Evaluation  ({self._processed} images)")
         logger.info(sep)
-
-        logger.info("  Global metrics (computed from dataset-level pixel counts):")
-        logger.info(f"  {'Metric':<12}  {'background':>12}  {'antenna':>12}  {'mean':>10}")
-        logger.info(f"  {'-'*50}")
-        for metric, key in [("IoU", "iou"), ("Dice", "dice"), ("Precision", "precision"), ("Recall", "recall")]:
-            per = stats[f"{key}_per_class"]
-            mean = stats[f"m{key}"]
-            row = "  ".join(_fmt(per[i]) for i in range(NUM_CLASSES))
-            logger.info(f"  {metric:<12}  {_fmt(per[0]):>12}  {_fmt(per[1]):>12}  {_fmt(mean):>10}")
-
-        logger.info(f"  Per-image statistics (mean ± std across {self._processed} images):")
-        logger.info(f"  {'Metric':<12}  {'background':>20}  {'antenna':>20}")
-        logger.info(f"  {'-'*56}")
-        for metric, m_key, s_key in [
-            ("IoU",  "iou_mean_per_class",  "iou_std_per_class"),
-            ("Dice", "dice_mean_per_class", "dice_std_per_class"),
-        ]:
-            means = stats[m_key]
-            stds  = stats[s_key]
-            logger.info(
-                f"  {metric:<12}  "
-                f"{_fmt_meanstd(means[0], stds[0]):>20}  "
-                f"{_fmt_meanstd(means[1], stds[1]):>20}"
-            )
+        for line in self._report_lines(stats):
+            logger.info(line)
         logger.info(sep)
 
     def _save(self, stats: dict, output_path: str) -> None:
         os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
-
-        lines = [
-            f"Evaluation Results  ({self._processed} images)",
-            "=" * 56,
-            "",
-            "Global metrics (from dataset-level pixel counts):",
-            f"  {'Metric':<12}  {'background':>12}  {'antenna':>12}  {'mean':>10}",
-            f"  {'-'*50}",
+        header = [
+            f"Instance Segmentation Evaluation  ({self._processed} images)",
+            "=" * 50,
         ]
-        for metric, key in [("IoU", "iou"), ("Dice", "dice"), ("Precision", "precision"), ("Recall", "recall")]:
-            per  = stats[f"{key}_per_class"]
-            mean = stats[f"m{key}"]
-            lines.append(f"  {metric:<12}  {_fmt(per[0]):>12}  {_fmt(per[1]):>12}  {_fmt(mean):>10}")
-
-        lines += [
-            "",
-            f"Per-image statistics (mean ± std across {self._processed} images):",
-            f"  {'Metric':<12}  {'background':>20}  {'antenna':>20}",
-            f"  {'-'*56}",
-        ]
-        for metric, m_key, s_key in [
-            ("IoU",  "iou_mean_per_class",  "iou_std_per_class"),
-            ("Dice", "dice_mean_per_class", "dice_std_per_class"),
-        ]:
-            means = stats[m_key]
-            stds  = stats[s_key]
-            lines.append(
-                f"  {metric:<12}  "
-                f"{_fmt_meanstd(means[0], stds[0]):>20}  "
-                f"{_fmt_meanstd(means[1], stds[1]):>20}"
-            )
-
         with open(output_path, "w") as f:
-            f.write("\n".join(lines) + "\n")
-
+            f.write("\n".join(header + self._report_lines(stats)) + "\n")
         logger.info(f"Evaluation report saved → {output_path}")
-
-    def _find_gt(self, stem: str) -> Optional[Path]:
-        for ext in ("png", "jpg", "tif", "jpeg", "PNG", "JPG"):
-            p = self.gt_dir / f"{stem}.{ext}"
-            if p.exists():
-                return p
-        return None

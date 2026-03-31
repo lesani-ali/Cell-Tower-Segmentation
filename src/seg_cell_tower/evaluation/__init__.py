@@ -1,3 +1,3 @@
-from .evaluator import Eval, CLASS_NAMES
+from .evaluator import Eval
 
-__all__ = ["Eval", "CLASS_NAMES"]
+__all__ = ["Eval"]

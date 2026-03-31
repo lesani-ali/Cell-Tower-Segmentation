@@ -32,11 +32,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "-e", "--eval", action="store_true",
-        help="Enable evaluation: compute IoU and Dice vs ground-truth masks during inference.",
+        help="Enable evaluation against COCO-format ground truth.",
     )
     parser.add_argument(
-        "-g", "--gt-dir", type=str, default="./data/gt",
-        help="Ground-truth mask directory (used only when --eval is set).",
+        "-g", "--gt-path", type=str, default="./data/annotation/instances.json",
+        help="Path to COCO-format GT annotation JSON (used only when --eval is set).",
     )
     parser.add_argument(
         "-r", "--output-report", type=str, default=None,
@@ -60,7 +60,7 @@ def main() -> None:
     logger.info(f"  Output dir  : {args.output_img_dir}")
     logger.info(f"  Mask dir    : {args.output_mask_dir}")
     if args.eval:
-        logger.info(f"  Eval        : ON  (GT dir: {args.gt_dir})")
+        logger.info(f"  Eval        : ON  (GT Path: {args.gt_path})")
     else:
         logger.info("  Eval        : OFF")
     logger.info("")
@@ -71,7 +71,7 @@ def main() -> None:
         args.input_img_dir,
         args.output_img_dir,
         args.output_mask_dir,
-        gt_dir=args.gt_dir if args.eval else None,
+        gt_path=args.gt_path if args.eval else None,
         output_report=args.output_report if args.eval else None,
     )
 

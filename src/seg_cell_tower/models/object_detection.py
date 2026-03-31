@@ -54,7 +54,7 @@ class ObjectDetectionModel(object):
             boxes=boxes
         )
 
-        return boxes_xyxy
+        return {"boxes": boxes_xyxy, "scores": logits.numpy()}
 
     @staticmethod
     def preprocess(img: Image.Image) -> torch.Tensor:

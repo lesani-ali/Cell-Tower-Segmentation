@@ -34,7 +34,7 @@ class SegmentationModel(object):
         Predict the segmentation masks for the image.
 
         :param image: Input image.
-        :param prompts: Input prompts for segmentation.
+        :param prompts: Input prompts for segmentation (Point or Box).
         :return: Segmentation masks.
         """
         image = np.asarray(image)

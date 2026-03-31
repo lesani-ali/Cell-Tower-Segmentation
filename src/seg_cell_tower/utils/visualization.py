@@ -23,16 +23,13 @@ def get_mask_img(masks, random_color=False):
         return
     h, w = masks.shape[-2:]
     rgb_mask = np.zeros((h, w, 4))
-    binary_mask = np.zeros((h, w))
 
     if random_color:
         for mask in masks:
             color_mask = np.concatenate([np.random.random(3), [0.35]])
             rgb_mask[mask] = color_mask
-            binary_mask[mask] = 1
     else:
         for mask in masks:
             color_mask = np.array([30/255, 144/255, 255/255, 0.35])
             rgb_mask[mask] = color_mask
-            binary_mask[mask] = 1
-    return rgb_mask, binary_mask
+    return rgb_mask

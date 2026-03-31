@@ -50,13 +50,16 @@ def bbox_iou(boxes: np.ndarray) -> np.ndarray:
 
 
 def remove_large_boxes(
-    boxes: np.ndarray,
+    results: dict,
     img_height: int,
     threshold: float,
-) -> np.ndarray:
+) -> dict:
     """
     Remove boxes that are disproportionately large relative to the scene.
     """
+    boxes = results["boxes"]
+    scores = results["scores"]
+    
     largest_idx = np.argmax(
         (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
     )
@@ -68,34 +71,46 @@ def remove_large_boxes(
     mask_tall = box_height > img_height * threshold
     mask_nooverlap = bbox_iou(boxes)[largest_idx] < 1e-5
 
-    return boxes[~(mask_wide | mask_tall | mask_nooverlap)]
+    results["boxes"] = boxes[~(mask_wide | mask_tall | mask_nooverlap)]
+    results["scores"] = scores[~(mask_wide | mask_tall | mask_nooverlap)]
+
+    return results
 
 
 def remove_farther_objects(
     depth_map: np.ndarray,
-    boxes: np.ndarray,
+    results: dict,
     threshold: int,
-) -> np.ndarray:
+) -> dict:
     """
     Drop boxes whose ROI mean depth is below *threshold* (too far away).
     """
+    boxes = results["boxes"]
+    scores = results["scores"]
+
     keep = np.ones(len(boxes), dtype=bool)
     for idx, (x1, y1, x2, y2) in enumerate(boxes):
         x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
         roi = depth_map[y1:y2, x1:x2]
         if np.mean(roi) < threshold:
             keep[idx] = False
-    return boxes[keep]
+
+    results["boxes"] = boxes[keep]
+    results["scores"] = scores[keep]
+    return results
 
 
 def filter_nested_boxes(
-    boxes: np.ndarray,
+    results: dict,
     iou_threshold: float = 0.5,
-) -> np.ndarray:
+) -> dict:
     """
     Remove boxes that are largely contained within a larger sibling box.
     """
     # Sort largest-first so outer boxes are processed first
+    boxes = results["boxes"]
+    scores = results["scores"]
+
     order = np.argsort(-(boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1]))
     boxes = boxes[order]
     iou = bbox_iou(boxes)
@@ -107,21 +122,23 @@ def filter_nested_boxes(
                 keep[i] = False
                 break
 
-    return boxes[keep]
+    results["boxes"] = boxes[keep]
+    results["scores"] = scores[keep]
+    return results
 
 
 def post_process_boxes(
-    boxes: np.ndarray,
+    results: dict,
     image_height: int,
     depth_map: np.ndarray,
     large_box_threshold: float = 0.4,
     iou_threshold: float = 0.5,
     farther_object_threshold: int = 80,
-) -> np.ndarray:
+) -> dict:
     """
     Full post-processing chain for detected bounding boxes.
     """
-    boxes = remove_large_boxes(boxes, image_height, threshold=large_box_threshold)
-    boxes = filter_nested_boxes(boxes, iou_threshold=iou_threshold)
-    boxes = remove_farther_objects(depth_map, boxes, farther_object_threshold)
-    return boxes
+    results = remove_large_boxes(results, image_height, threshold=large_box_threshold)
+    results = filter_nested_boxes(results, iou_threshold=iou_threshold)
+    results = remove_farther_objects(depth_map, results, farther_object_threshold)
+    return results

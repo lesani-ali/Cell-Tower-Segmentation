@@ -39,11 +39,11 @@ def run_inference(
     )
 
     # Step 4: Detect antenna bounding boxes
-    boxes = object_detection_model(no_background_img)
+    results = object_detection_model(no_background_img)
 
     # Step 5: Filter spurious / oversized / far-away boxes
-    boxes = post_process_boxes(
-        boxes,
+    results = post_process_boxes(
+        results,
         image_height,
         depth_map,
         large_box_threshold=0.4,
@@ -52,6 +52,6 @@ def run_inference(
     )
 
     # Step 6: SAM segmentation prompt by box
-    masks = segmentation_model(image, boxes)
+    masks = segmentation_model(image, results["boxes"])
 
-    return masks
+    return {"masks": masks, "scores": results["scores"]}    
