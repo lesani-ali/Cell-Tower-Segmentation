@@ -121,23 +121,54 @@ Run the segmentation pipeline on a directory of images:
 
 ```bash
 segct \
-    --config-dir ./config/config.yaml \
-    --input-img-dir ./data/input_images \
-    --output-img-dir ./data/output_images \
-    --output-mask-dir ./data/output_masks
+    -c ./config/config.yaml \
+    -i ./data/input_images \
+    -o ./data/output_images \
+    -m ./data/output_masks
 ```
 
 **Arguments**:
-- `--config-dir`: Path to configuration file (default: `./config/config.yaml`)
-- `--input-img-dir`: Directory containing input images (default: `./data/input_images`)
-- `--output-img-dir`: Directory to save visualization images (default: `./data/output_images`)
-- `--output-mask-dir`: Directory to save segmentation masks (default: `./data/output_masks`)
+
+| Short | Long | Default | Description |
+|---|---|---|---|
+| `-c` | `--config-dir` | `./config/config.yaml` | Path to YAML config file |
+| `-i` | `--input-img-dir` | `./data/input_images` | Directory of input images |
+| `-o` | `--output-img-dir` | `./data/output_images` | Directory to save overlay images |
+| `-m` | `--output-mask-dir` | `./data/output_masks` | Directory to save segmentation masks |
+| `-e` | `--eval` | off | Enable evaluation against COCO-format GT |
+| `-g` | `--gt-path` | `./data/annotation/instances.json` | Path to COCO annotation JSON (with `--eval`) |
+| `-r` | `--output-report` | none | Path to save the evaluation report (with `--eval`) |
+
+### Evaluation
+
+To evaluate predictions against ground-truth annotations during inference, pass `--eval` along with the path to a [COCO-format](https://cocodataset.org/#format-data) annotation JSON:
+
+```bash
+segct \
+    -i ./data/input_images \
+    -o ./data/output_images \
+    -m ./data/output_masks \
+    -e \
+    -g ./data/annotation/instances.json \
+    -r ./logs/eval_report.txt
+```
+
+**Evaluation Metrics:**
+
+| Metric | Description |
+|---|---|
+| AP@0.5 | Area under PR curve at IoU ≥ 0.5 |
+| AP@0.75 | Area under PR curve at IoU ≥ 0.75 |
+| mAP@[0.5:0.95] | Mean AP over IoU thresholds 0.50–0.95 (step 0.05) |
+| Precision@0.5 | Fraction of predictions matched to a GT at IoU ≥ 0.5 |
+| Recall@0.5 | Fraction of GT instances matched at IoU ≥ 0.5 |
+| Mean Matched IoU@0.5 | Average IoU of true-positive pairs at threshold 0.5 |
 
 ### Python API
 
 ```python
 from seg_cell_tower.pipeline.pipeline import SegmentationPipeline
-from seg_cell_tower.utils.config import load_config
+from seg_cell_tower.config import load_config
 from seg_cell_tower.utils.io import load_image
 
 # Load configuration
@@ -146,15 +177,19 @@ config = load_config('./config/config.yaml')
 # Initialize pipeline
 pipeline = SegmentationPipeline(config)
 
-# Run inference on single image
+# Run inference on a single image
 image = load_image('./data/input_images/tower.jpg')
-masks = pipeline.predict(image)
+output = pipeline.predict(image)
+# output["masks"]  → (N, H, W) bool — one mask per detected instance
+# output["scores"] → (N,) float  — confidence score per instance
 
-# Or process entire directory
+# Or process an entire directory (with optional evaluation)
 pipeline.process_directory(
     input_img_dir='./data/input_images',
     output_img_dir='./data/output_images',
-    output_mask_dir='./data/output_masks'
+    output_mask_dir='./data/output_masks',
+    gt_path='./data/annotation/instances.json',   # omit to skip eval
+    output_report='./logs/eval_report.txt',        # omit to skip saving
 )
 ```
 
