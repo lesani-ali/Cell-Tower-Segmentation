@@ -23,7 +23,7 @@ recover_info_threshold: 140 # This is a depth threshold: Any pixel having depth 
 ignore_info_threshold: 80 # This is a depth threshold: Any pixel having depth value greater than this threshold will be considered as recoverable information
 
 
-log_dir: "./logs"
+log_dir: "./logs/log.txt"
 
 
 

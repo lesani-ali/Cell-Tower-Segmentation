@@ -1,7 +1,5 @@
-
-import yaml
+from typing import Literal, Optional
 from pydantic import BaseModel, Field
-from typing import Literal
 
 
 class SaliencyConfig(BaseModel):
@@ -30,22 +28,18 @@ class SegmentationConfig(BaseModel):
 
 
 class ModelsConfig(BaseModel):
-    saliency: SaliencyConfig
-    depth: DepthConfig
-    object_detection: ObjectDetectionConfig
-    segmentation: SegmentationConfig
+    saliency: SaliencyConfig = Field(default_factory=SaliencyConfig)
+    depth: DepthConfig = Field(default_factory=DepthConfig)
+    object_detection: ObjectDetectionConfig = Field(
+        default_factory=ObjectDetectionConfig
+    )
+    segmentation: SegmentationConfig = Field(
+        default_factory=SegmentationConfig
+    )
 
 
 class Config(BaseModel):
-    models: ModelsConfig
-    recover_info_threshold: int = Field(ge=0, default=140, description="Depth threshold for recoverable information")
-    ignore_info_threshold: int = Field(ge=0, default=80, description="Depth threshold for ignorable information")
-    log_dir: str = "./logs"
-
-
-def load_config(config_path: str) -> Config:
-    """Load and validate configuration from YAML file."""
-    with open(config_path, 'r') as file:
-        config_dict = yaml.safe_load(file)
-    
-    return Config(**config_dict)
+    models: ModelsConfig = Field(default_factory=ModelsConfig)
+    recover_info_threshold: int = Field(ge=0, default=140)
+    ignore_info_threshold: int = Field(ge=0, default=80)
+    log_dir: Optional[str] = None

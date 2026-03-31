@@ -22,15 +22,14 @@ def get_mask_img(masks, random_color=False):
     if len(masks) == 0:
         return
     h, w = masks.shape[-2:]
-    img = np.zeros((h, w, 4))
-    img[:, :, 3] = 0
+    rgb_mask = np.zeros((h, w, 4))
 
     if random_color:
         for mask in masks:
             color_mask = np.concatenate([np.random.random(3), [0.35]])
-            img[mask] = color_mask
+            rgb_mask[mask] = color_mask
     else:
         for mask in masks:
             color_mask = np.array([30/255, 144/255, 255/255, 0.35])
-            img[mask] = color_mask
-    return img
+            rgb_mask[mask] = color_mask
+    return rgb_mask

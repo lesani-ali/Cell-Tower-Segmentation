@@ -1,7 +1,9 @@
 from typing import Dict, Any
 from PIL import Image
-import logging
 from transparent_background import Remover
+from ..logging import get_logger
+
+logger = get_logger(__name__)
 
 
 class SaliencyDetectionModel(object):
@@ -29,7 +31,7 @@ class SaliencyDetectionModel(object):
         try:
             image = self.model.process(image, type='white')
         except Exception as e:
-            logging.error(f"Error removing background: {e}")
+            logger.error(f"Error removing background: {e}")
             raise
 
         return image
