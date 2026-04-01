@@ -140,6 +140,10 @@ class Eval:
         self._data: List[Tuple[np.ndarray, np.ndarray, int]] = []
         self._processed = 0
 
+        # 2×2 confusion matrix for global semantic IoU / Dice
+        # Rows = GT class, Cols = Pred class  (0=background, 1=antenna)
+        self._conf: np.ndarray = np.zeros((2, 2), dtype=np.int64)
+
         # GT index: filename → {height, width, annotations[]}
         self._gt: Dict[str, dict] = {}
         self._load_gt()
@@ -233,8 +237,27 @@ class Eval:
 
         # Compute pairwise IoU (M, N) — store only this small matrix
         iou_matrix = _pairwise_iou(pred_masks, gt_masks)
-
         self._data.append((pred_scores, iou_matrix, n_gt))
+
+        # Combine all masks into binary images and update confusion matrix
+        if n_gt > 0:
+            H, W = gt_masks.shape[1], gt_masks.shape[2]
+        else:
+            H, W = pred_masks.shape[1], pred_masks.shape[2]
+
+        pred_bin = (pred_masks.any(axis=0).astype(np.uint8)
+                    if len(pred_masks) > 0
+                    else np.zeros((H, W), dtype=np.uint8))
+        gt_bin = (gt_masks.any(axis=0).astype(np.uint8)
+                  if n_gt > 0
+                  else np.zeros((H, W), dtype=np.uint8))
+
+        hist = np.bincount(
+            2 * gt_bin.flatten() + pred_bin.flatten(),
+            minlength=4,
+        ).reshape(2, 2)
+        self._conf += hist
+
         self._processed += 1
 
     def compute(self) -> dict:
@@ -308,18 +331,31 @@ class Eval:
 
         mean_iou50 = float(np.mean(matched_ious_50)) if matched_ious_50 else float("nan")
 
+        # Global semantic IoU and Dice from confusion matrix
+        tp = np.diag(self._conf).astype(float)             # [TN, TP]
+        fp = self._conf.sum(axis=0).astype(float) - tp     # FP per class
+        fn = self._conf.sum(axis=1).astype(float) - tp     # FN per class
+
+        iou = tp / np.maximum(tp + fp + fn, 1e-7)          # (2,)
+        dice = (2 * tp) / np.maximum(2 * tp + fp + fn, 1e-7)  # (2,)
+
         return {
+            # Instance metrics
             "ap50": float(ap50),
             "ap75": float(ap75),
             "map": map_score,
             "precision50": precision50,
             "recall50": recall50,
             "mean_iou50": mean_iou50,
+            # Semantic metrics (combined binary masks)
+            "iou_fg": float(iou[1]),
+            "dice_fg": float(dice[1]),
         }
 
     def reset(self) -> None:
         """Reset all accumulators."""
         self._data.clear()
+        self._conf[:] = 0
         self._processed = 0
 
     def finalize(self) -> None:
@@ -336,12 +372,16 @@ class Eval:
     def _report_lines(self, stats: dict) -> List[str]:
         w = 30
         return [
+            f"  --- Instance Segmentation Metrics ---",
             f"  {'AP@0.5':<{w}}: {stats['ap50']:0.4f}",
             f"  {'AP@0.75':<{w}}: {stats['ap75']:0.4f}",
             f"  {'mAP@[0.5:0.95]':<{w}}: {stats['map']:0.4f}",
             f"  {'Precision@0.5':<{w}}: {stats['precision50']:0.4f}",
             f"  {'Recall@0.5':<{w}}: {stats['recall50']:0.4f}",
             f"  {'Mean Matched IoU@0.5':<{w}}: {stats['mean_iou50']:0.4f}",
+            f"  --- Semantic Mask Quality (binary union) ---",
+            f"  {'IoU  antenna':<{w}}: {stats['iou_fg']:0.4f}",
+            f"  {'Dice antenna':<{w}}: {stats['dice_fg']:0.4f}",
         ]
 
     def _log(self, stats: dict) -> None:
