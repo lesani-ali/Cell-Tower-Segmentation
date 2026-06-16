@@ -1,9 +1,9 @@
 import argparse
 import warnings
 
-from ..pipeline.pipeline import SegmentationPipeline
-from ..config import load_config
-from ..logging import setup_logger, get_logger
+from .pipeline.pipeline import SegmentationPipeline
+from .config import Config
+from .logging import setup_logger, get_logger
 
 warnings.filterwarnings("ignore")
 
@@ -15,31 +15,51 @@ def parse_args() -> argparse.Namespace:
         description="Run the cell-tower segmentation pipeline."
     )
     parser.add_argument(
-        "-c", "--config-dir", type=str, default="./config/config.yaml",
+        "-c",
+        "--config-dir",
+        type=str,
+        default="./config/config.yaml",
         help="Path to the YAML configuration file.",
     )
     parser.add_argument(
-        "-i", "--input-img-dir", type=str, default="./data/input_images",
+        "-i",
+        "--input-img-dir",
+        type=str,
+        default="./data/input_images",
         help="Directory of input images.",
     )
     parser.add_argument(
-        "-o", "--output-img-dir", type=str, default="./data/output_images",
+        "-o",
+        "--output-img-dir",
+        type=str,
+        default="./data/output_images",
         help="Directory to save overlay images.",
     )
     parser.add_argument(
-        "-m", "--output-mask-dir", type=str, default="./data/output_masks",
+        "-m",
+        "--output-mask-dir",
+        type=str,
+        default="./data/output_masks",
         help="Directory to save binary masks.",
     )
     parser.add_argument(
-        "-e", "--eval", action="store_true",
+        "-e",
+        "--eval",
+        action="store_true",
         help="Enable evaluation against COCO-format ground truth.",
     )
     parser.add_argument(
-        "-g", "--gt-path", type=str, default="./data/annotation/instances.json",
+        "-g",
+        "--gt-path",
+        type=str,
+        default="./data/annotation/instances.json",
         help="Path to COCO-format GT annotation JSON (used only when --eval is set).",
     )
     parser.add_argument(
-        "-r", "--output-report", type=str, default=None,
+        "-r",
+        "--output-report",
+        type=str,
+        default=None,
         help="(Optional) Path to save the evaluation report CSV (used only when --eval is set).",
     )
     return parser.parse_args()
@@ -49,7 +69,7 @@ def main() -> None:
     """Entry-point for the `segct` command."""
     args = parse_args()
 
-    config = load_config(args.config_dir)
+    config = Config.from_yaml(args.config_dir)
     setup_logger(log_file=config.log_dir)
 
     logger.info("=" * 60)
@@ -80,4 +100,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

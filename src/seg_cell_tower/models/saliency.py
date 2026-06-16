@@ -1,13 +1,13 @@
 from typing import Dict, Any
 from PIL import Image
 from transparent_background import Remover
+
 from ..logging import get_logger
 
 logger = get_logger(__name__)
 
 
 class SaliencyDetectionModel(object):
-
     def __init__(self, config: Dict[str, Any]):
         """
         Initialize the SaliencyDetectionModel.
@@ -29,7 +29,7 @@ class SaliencyDetectionModel(object):
         :return: Image with background removed.
         """
         try:
-            image = self.model.process(image, type='white')
+            image = self.model.process(image, type="white")
         except Exception as e:
             logger.error(f"Error removing background: {e}")
             raise

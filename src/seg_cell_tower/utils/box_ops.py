@@ -59,15 +59,15 @@ def remove_large_boxes(
     """
     boxes = results["boxes"]
     scores = results["scores"]
-    
-    largest_idx = np.argmax(
-        (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
-    )
+
+    largest_idx = np.argmax((boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1]))
 
     box_width = np.abs(boxes[:, 2] - boxes[:, 0])
     box_height = np.abs(boxes[:, 3] - boxes[:, 1])
 
-    mask_wide = box_width > threshold * np.abs(boxes[largest_idx, 2] - boxes[largest_idx, 0])
+    mask_wide = box_width > threshold * np.abs(
+        boxes[largest_idx, 2] - boxes[largest_idx, 0]
+    )
     mask_tall = box_height > img_height * threshold
     mask_nooverlap = bbox_iou(boxes)[largest_idx] < 1e-5
 

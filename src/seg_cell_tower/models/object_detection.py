@@ -8,7 +8,6 @@ import groundingdino.datasets.transforms as T
 
 
 class ObjectDetectionModel(object):
-
     def __init__(self, config: Dict[str, Any]):
         """
         Initialize the ObjectDetectionModel.
@@ -20,11 +19,7 @@ class ObjectDetectionModel(object):
             - obj_det_box: Threshold for box predictions.
             - obj_det_text: Threshold for text predictions.
         """
-        self.model = load_model(
-            config.config_path,
-            config.ckpt,
-            device=config.device
-        )
+        self.model = load_model(config.config_path, config.ckpt, device=config.device)
         self.config = config
 
     def __call__(self, image: np.ndarray) -> np.ndarray:
@@ -45,13 +40,11 @@ class ObjectDetectionModel(object):
             image=transformed_img,
             caption=self.config.text_prompt,
             box_threshold=self.config.box_threshold,
-            text_threshold=self.config.text_threshold
+            text_threshold=self.config.text_threshold,
         )
 
         boxes_xyxy = ObjectDetectionModel.post_process_result(
-            source_h=h,
-            source_w=w,
-            boxes=boxes
+            source_h=h, source_w=w, boxes=boxes
         )
 
         return {"boxes": boxes_xyxy, "scores": logits.numpy()}
@@ -79,9 +72,7 @@ class ObjectDetectionModel(object):
 
     @staticmethod
     def post_process_result(
-            source_h: int,
-            source_w: int,
-            boxes: torch.Tensor
+        source_h: int, source_w: int, boxes: torch.Tensor
     ) -> np.ndarray:
         """
         Post-process the model output.

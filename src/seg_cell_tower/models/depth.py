@@ -10,7 +10,6 @@ from typing import Any, Dict, Tuple
 
 
 class DepthModel(object):
-
     def __init__(self, config: Dict[str, Any]):
         """
         Initialize the DepthModel.
@@ -85,8 +84,9 @@ class DepthModel(object):
         :param grayscale: Whether to return the depth image in grayscale.
         :return: Postprocessed depth map.
         """
-        depth = F.interpolate(
-            depth[None], size, mode="bilinear", align_corners=False)[0, 0]
+        depth = F.interpolate(depth[None], size, mode="bilinear", align_corners=False)[
+            0, 0
+        ]
 
         depth = (depth - depth.min()) / (depth.max() - depth.min()) * 255.0
         depth = depth.cpu().numpy().astype(np.uint8)

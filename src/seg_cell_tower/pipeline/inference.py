@@ -7,7 +7,7 @@ from ..models.saliency import SaliencyDetectionModel
 from ..models.depth import DepthModel
 from ..models.object_detection import ObjectDetectionModel
 from ..models.segmentation import SegmentationModel
-from ..postprocessing.box_ops import add_missed_info, post_process_boxes
+from ..utils.box_ops import add_missed_info, post_process_boxes
 from ..logging import get_logger
 
 logger = get_logger(__name__)
@@ -34,7 +34,9 @@ def run_inference(
 
     # Step 3: Recover missed foreground information using depth
     no_background_img = add_missed_info(
-        depth_map, saliency_img, image,
+        depth_map,
+        saliency_img,
+        image,
         config.recover_info_threshold,
     )
 
@@ -54,4 +56,4 @@ def run_inference(
     # Step 6: SAM segmentation prompt by box
     masks = segmentation_model(image, results["boxes"])
 
-    return {"masks": masks, "scores": results["scores"]}    
+    return {"masks": masks, "scores": results["scores"]}

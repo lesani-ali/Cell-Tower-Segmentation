@@ -11,7 +11,8 @@ from ..logging import get_logger
 logger = get_logger(__name__)
 
 # IoU thresholds for mAP@[0.5:0.95]
-IOU_THRESHOLDS = np.arange(0.50, 1.00, 0.05)   # [0.50, 0.55, …, 0.95]
+IOU_THRESHOLDS = np.arange(0.50, 1.00, 0.05)  # [0.50, 0.55, …, 0.95]
+
 
 def _poly_to_mask(segmentation: list, height: int, width: int) -> np.ndarray:
     """Rasterize a COCO polygon segmentation to a binary (bool) mask."""
@@ -40,11 +41,13 @@ def _pairwise_iou(pred_masks: np.ndarray, gt_masks: np.ndarray) -> np.ndarray:
     if M == 0 or N == 0:
         return np.zeros((M, N), dtype=np.float32)
 
-    gt_areas = gt_masks.sum(axis=(1, 2)).astype(np.float32)   # (N,)
+    gt_areas = gt_masks.sum(axis=(1, 2)).astype(np.float32)  # (N,)
     iou_matrix = np.zeros((M, N), dtype=np.float32)
 
     for i in range(M):
-        inter = np.logical_and(pred_masks[i], gt_masks).sum(axis=(1, 2)).astype(np.float32)  # (N,)
+        inter = (
+            np.logical_and(pred_masks[i], gt_masks).sum(axis=(1, 2)).astype(np.float32)
+        )  # (N,)
         union = float(pred_masks[i].sum()) + gt_areas - inter
         iou_matrix[i] = inter / np.maximum(union, 1e-7)
 
@@ -69,14 +72,14 @@ def _greedy_match(
         matched_ious (list[float]): IoU value of each matched pair.
     """
     M, N = iou_matrix.shape
-    order = np.argsort(-pred_scores)          # descending score
+    order = np.argsort(-pred_scores)  # descending score
     is_tp = np.zeros(M, dtype=bool)
     matched_gt = np.zeros(N, dtype=bool)
     matched_ious = []
 
     for orig_idx in order:
         row = iou_matrix[orig_idx].copy()
-        row[matched_gt] = -1.0               # mask already-matched GT
+        row[matched_gt] = -1.0  # mask already-matched GT
         best_gt = int(np.argmax(row))
 
         if row[best_gt] >= iou_thresh:
@@ -108,7 +111,7 @@ def _compute_ap_101(scores: np.ndarray, is_tp: np.ndarray, n_gt: int) -> float:
     tp_cum = np.cumsum(is_tp[order].astype(float))
     fp_cum = np.cumsum((~is_tp[order]).astype(float))
 
-    precision = tp_cum / (tp_cum + fp_cum)  
+    precision = tp_cum / (tp_cum + fp_cum)
     recall = tp_cum / n_gt
 
     # 101-point interpolation (COCO standard)
@@ -186,9 +189,7 @@ class Eval:
         if info is None:
             # Fall back: match by stem
             stem = Path(image_name).stem
-            info = next(
-                (v for k, v in self._gt.items() if Path(k).stem == stem), None
-            )
+            info = next((v for k, v in self._gt.items() if Path(k).stem == stem), None)
         if info is None:
             return None
 
@@ -227,13 +228,19 @@ class Eval:
             gh, gw = gt_masks.shape[1], gt_masks.shape[2]
             if (ph, pw) != (gh, gw):
                 logger.warning(
-                    f"[{image_name}] pred size {(ph,pw)} ≠ GT size {(gh,gw)}, resizing."
+                    f"[{image_name}] pred size {(ph, pw)} ≠ GT size {(gh, gw)}, resizing."
                 )
-                pred_masks = np.stack([
-                    cv2.resize(m.astype(np.uint8), (gw, gh),
-                               interpolation=cv2.INTER_NEAREST).astype(bool)
-                    for m in pred_masks
-                ], axis=0)
+                pred_masks = np.stack(
+                    [
+                        cv2.resize(
+                            m.astype(np.uint8),
+                            (gw, gh),
+                            interpolation=cv2.INTER_NEAREST,
+                        ).astype(bool)
+                        for m in pred_masks
+                    ],
+                    axis=0,
+                )
 
         # Compute pairwise IoU (M, N) — store only this small matrix
         iou_matrix = _pairwise_iou(pred_masks, gt_masks)
@@ -245,12 +252,16 @@ class Eval:
         else:
             H, W = pred_masks.shape[1], pred_masks.shape[2]
 
-        pred_bin = (pred_masks.any(axis=0).astype(np.uint8)
-                    if len(pred_masks) > 0
-                    else np.zeros((H, W), dtype=np.uint8))
-        gt_bin = (gt_masks.any(axis=0).astype(np.uint8)
-                  if n_gt > 0
-                  else np.zeros((H, W), dtype=np.uint8))
+        pred_bin = (
+            pred_masks.any(axis=0).astype(np.uint8)
+            if len(pred_masks) > 0
+            else np.zeros((H, W), dtype=np.uint8)
+        )
+        gt_bin = (
+            gt_masks.any(axis=0).astype(np.uint8)
+            if n_gt > 0
+            else np.zeros((H, W), dtype=np.uint8)
+        )
 
         hist = np.bincount(
             2 * gt_bin.flatten() + pred_bin.flatten(),
@@ -273,12 +284,12 @@ class Eval:
 
         # Collect per-threshold data; also keep @0.5 for precision/recall/iou
         all_scores_50: List[float] = []
-        all_is_tp_50:  List[bool]  = []
+        all_is_tp_50: List[bool] = []
         matched_ious_50: List[float] = []
 
         for t_idx, iou_thresh in enumerate(IOU_THRESHOLDS):
             scores_all: List[float] = []
-            is_tp_all:  List[bool]  = []
+            is_tp_all: List[bool] = []
             n_gt_total = 0
 
             for pred_scores, iou_matrix, n_gt in self._data:
@@ -298,12 +309,12 @@ class Eval:
                 scores_all.extend(pred_scores.tolist())
                 is_tp_all.extend(is_tp.tolist())
 
-                if t_idx == 0:   # threshold == 0.5
+                if t_idx == 0:  # threshold == 0.5
                     matched_ious_50.extend(matched)
 
             if t_idx == 0:
                 all_scores_50 = scores_all[:]
-                all_is_tp_50  = is_tp_all[:]
+                all_is_tp_50 = is_tp_all[:]
 
             ap = _compute_ap_101(
                 np.array(scores_all, dtype=np.float32),
@@ -316,8 +327,8 @@ class Eval:
         valid = [v for v in ap_per_thresh if not np.isnan(v)]
         map_score = float(np.mean(valid)) if valid else float("nan")
 
-        ap50 = ap_per_thresh[0]    # index 0 → thresh 0.50
-        ap75 = ap_per_thresh[5]    # index 5 → thresh 0.75
+        ap50 = ap_per_thresh[0]  # index 0 → thresh 0.50
+        ap75 = ap_per_thresh[5]  # index 5 → thresh 0.75
 
         # Precision and Recall @0.5
         if all_scores_50:
@@ -329,14 +340,16 @@ class Eval:
         else:
             precision50 = recall50 = float("nan")
 
-        mean_iou50 = float(np.mean(matched_ious_50)) if matched_ious_50 else float("nan")
+        mean_iou50 = (
+            float(np.mean(matched_ious_50)) if matched_ious_50 else float("nan")
+        )
 
         # Global semantic IoU and Dice from confusion matrix
-        tp = np.diag(self._conf).astype(float)             # [TN, TP]
-        fp = self._conf.sum(axis=0).astype(float) - tp     # FP per class
-        fn = self._conf.sum(axis=1).astype(float) - tp     # FN per class
+        tp = np.diag(self._conf).astype(float)  # [TN, TP]
+        fp = self._conf.sum(axis=0).astype(float) - tp  # FP per class
+        fn = self._conf.sum(axis=1).astype(float) - tp  # FN per class
 
-        iou = tp / np.maximum(tp + fp + fn, 1e-7)          # (2,)
+        iou = tp / np.maximum(tp + fp + fn, 1e-7)  # (2,)
         dice = (2 * tp) / np.maximum(2 * tp + fp + fn, 1e-7)  # (2,)
 
         return {
@@ -372,14 +385,14 @@ class Eval:
     def _report_lines(self, stats: dict) -> List[str]:
         w = 30
         return [
-            f"  --- Instance Segmentation Metrics ---",
+            "  --- Instance Segmentation Metrics ---",
             f"  {'AP@0.5':<{w}}: {stats['ap50']:0.4f}",
             f"  {'AP@0.75':<{w}}: {stats['ap75']:0.4f}",
             f"  {'mAP@[0.5:0.95]':<{w}}: {stats['map']:0.4f}",
             f"  {'Precision@0.5':<{w}}: {stats['precision50']:0.4f}",
             f"  {'Recall@0.5':<{w}}: {stats['recall50']:0.4f}",
             f"  {'Mean Matched IoU@0.5':<{w}}: {stats['mean_iou50']:0.4f}",
-            f"  --- Semantic Mask Quality (binary union) ---",
+            "  --- Semantic Mask Quality (binary union) ---",
             f"  {'IoU  antenna':<{w}}: {stats['iou_fg']:0.4f}",
             f"  {'Dice antenna':<{w}}: {stats['dice_fg']:0.4f}",
         ]

@@ -5,7 +5,12 @@ import numpy as np
 from PIL import Image
 from tqdm import tqdm
 
-from ..models import DepthModel, ObjectDetectionModel, SaliencyDetectionModel, SegmentationModel
+from ..models import (
+    DepthModel,
+    ObjectDetectionModel,
+    SaliencyDetectionModel,
+    SegmentationModel,
+)
 from ..utils.io import load_image
 from ..utils.visualization import combine_image_with_mask, get_mask_img
 from ..logging import get_logger
@@ -15,7 +20,6 @@ logger = get_logger(__name__)
 
 
 class SegmentationPipeline:
-
     def __init__(self, config: Any) -> None:
 
         logger.info("Loading saliency model…")
@@ -25,7 +29,9 @@ class SegmentationPipeline:
         self.depth_model = DepthModel(config.models.depth)
 
         logger.info("Loading object-detection model…")
-        self.object_detection_model = ObjectDetectionModel(config.models.object_detection)
+        self.object_detection_model = ObjectDetectionModel(
+            config.models.object_detection
+        )
 
         logger.info("Loading segmentation model (SAM)…")
         self.segmentation_model = SegmentationModel(config.models.segmentation)
@@ -65,19 +71,22 @@ class SegmentationPipeline:
         """
         Run inference on every image in input_img_dir.
         """
-        os.makedirs(output_img_dir,  exist_ok=True)
+        os.makedirs(output_img_dir, exist_ok=True)
         os.makedirs(output_mask_dir, exist_ok=True)
 
         evaluator = None
         if gt_path:
             from ..evaluation.evaluator import Eval
+
             evaluator = Eval(gt_path=gt_path, output_report=output_report)
             logger.info(f"Evaluation enabled — GT path: {gt_path}")
 
         input_imgs = sorted(os.listdir(input_img_dir))
         total_images = len(input_imgs)
 
-        for idx, filename in enumerate(tqdm(input_imgs, desc="Processing images", ncols=100)):
+        for idx, filename in enumerate(
+            tqdm(input_imgs, desc="Processing images", ncols=100)
+        ):
             if not filename.lower().endswith((".jpg", ".png")):
                 continue
 
@@ -91,7 +100,7 @@ class SegmentationPipeline:
             output = self(in_img)
 
             # Build combined mask image (H×W, values 0 or 255)
-            rgb_mask = get_mask_img(output["masks"], random_color=True)
+            rgb_mask = get_mask_img(output["masks"], random_color=False)
             output_mask = Image.fromarray((rgb_mask * 255).astype(np.uint8))
 
             # Save mask
@@ -112,4 +121,3 @@ class SegmentationPipeline:
         # Print + save full evaluation report
         if evaluator is not None:
             evaluator.finalize()
-
