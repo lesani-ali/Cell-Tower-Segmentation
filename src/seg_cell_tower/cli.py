@@ -1,7 +1,7 @@
 import argparse
 import warnings
 
-from .pipeline.pipeline import SegmentationPipeline
+from .pipeline import SegmentationPipeline
 from .config import Config
 from .logging import setup_logger, get_logger
 

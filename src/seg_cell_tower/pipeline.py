@@ -1,26 +1,28 @@
 import os
-from typing import Any, Optional
+from typing import Optional
 
 import numpy as np
 from PIL import Image
 from tqdm import tqdm
 
-from ..models import (
+from .config import Config
+from .evaluation import SegmentationEvaluator
+from .logging import get_logger
+from .models import (
     DepthModel,
     ObjectDetectionModel,
     SaliencyDetectionModel,
     SegmentationModel,
 )
-from ..utils.io import load_image
-from ..utils.visualization import combine_image_with_mask, get_mask_img
-from ..logging import get_logger
-from .inference import run_inference
+from .postprocessing import add_missed_info, post_process_boxes
+from .utils.io import load_image
+from .utils.visualization import combine_image_with_mask, get_mask_img
 
 logger = get_logger(__name__)
 
 
 class SegmentationPipeline:
-    def __init__(self, config: Any) -> None:
+    def __init__(self, config: Config) -> None:
 
         logger.info("Loading saliency model…")
         self.saliency_model = SaliencyDetectionModel(config.models.saliency)
@@ -38,10 +40,10 @@ class SegmentationPipeline:
 
         self.config = config
 
-    def __call__(self, image: Image.Image) -> np.ndarray:
+    def __call__(self, image: Image.Image) -> dict:
         return self.predict(image)
 
-    def predict(self, image: Image.Image) -> np.ndarray:
+    def predict(self, image: Image.Image) -> dict:
         """
         Run the full pipeline on a single image.
 
@@ -49,16 +51,43 @@ class SegmentationPipeline:
             image : PIL.Image.Image
 
         Returns:
-            np.ndarray  shape (N, H, W) — boolean masks, one per detected antenna.
+            dict with keys:
+                masks  : np.ndarray (N, H, W) bool — one per detected antenna.
+                scores : np.ndarray (N,) float — detection confidence per mask.
         """
-        return run_inference(
+        image_height = image.height
+
+        # Step 1: Saliency detection — remove background
+        saliency_img = self.saliency_model(image)
+
+        # Step 2: Depth estimation
+        depth_map = self.depth_model(image)
+
+        # Step 3: Recover missed foreground information using depth
+        no_background_img = add_missed_info(
+            depth_map,
+            saliency_img,
             image,
-            self.saliency_model,
-            self.depth_model,
-            self.object_detection_model,
-            self.segmentation_model,
-            self.config,
+            self.config.recover_info_threshold,
         )
+
+        # Step 4: Detect antenna bounding boxes
+        results = self.object_detection_model(no_background_img)
+
+        # Step 5: Filter spurious / oversized / far-away boxes
+        results = post_process_boxes(
+            results,
+            image_height,
+            depth_map,
+            large_box_threshold=0.4,
+            iou_threshold=0.5,
+            farther_object_threshold=70,
+        )
+
+        # Step 6: SAM segmentation prompt by box
+        masks = self.segmentation_model(image, results["boxes"])
+
+        return {"masks": masks, "scores": results["scores"]}
 
     def process_directory(
         self,
@@ -76,9 +105,7 @@ class SegmentationPipeline:
 
         evaluator = None
         if gt_path:
-            from ..evaluation.evaluator import Eval
-
-            evaluator = Eval(gt_path=gt_path, output_report=output_report)
+            evaluator = SegmentationEvaluator(gt_path=gt_path, output_report=output_report)
             logger.info(f"Evaluation enabled — GT path: {gt_path}")
 
         input_imgs = sorted(os.listdir(input_img_dir))
