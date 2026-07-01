@@ -6,11 +6,13 @@ from torchvision.transforms import Compose
 import torch.nn.functional as F
 from depth_anything.dpt import DepthAnything
 from depth_anything.util.transform import Resize, NormalizeImage, PrepareForNet
-from typing import Any, Dict, Tuple
+from typing import Tuple
+
+from ..config import DepthConfig
 
 
-class DepthModel(object):
-    def __init__(self, config: Dict[str, Any]):
+class DepthModel:
+    def __init__(self, config: DepthConfig):
         """
         Initialize the DepthModel.
 

@@ -1,14 +1,14 @@
-from typing import Dict, Any
 from PIL import Image
 from transparent_background import Remover
 
+from ..config import SaliencyConfig
 from ..logging import get_logger
 
 logger = get_logger(__name__)
 
 
-class SaliencyDetectionModel(object):
-    def __init__(self, config: Dict[str, Any]):
+class SaliencyDetectionModel:
+    def __init__(self, config: SaliencyConfig):
         """
         Initialize the SaliencyDetectionModel.
 

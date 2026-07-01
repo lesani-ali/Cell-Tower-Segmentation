@@ -1,4 +1,3 @@
-from typing import Dict, Any
 import torch
 from PIL import Image
 import numpy as np
@@ -6,9 +5,11 @@ from groundingdino.util.inference import load_model, predict
 from torchvision.ops import box_convert
 import groundingdino.datasets.transforms as T
 
+from ..config import ObjectDetectionConfig
 
-class ObjectDetectionModel(object):
-    def __init__(self, config: Dict[str, Any]):
+
+class ObjectDetectionModel:
+    def __init__(self, config: ObjectDetectionConfig):
         """
         Initialize the ObjectDetectionModel.
 

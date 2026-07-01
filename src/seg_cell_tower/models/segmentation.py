@@ -1,11 +1,12 @@
-from typing import Dict, Any
 from PIL import Image
 import numpy as np
 from segment_anything import sam_model_registry, SamPredictor
 
+from ..config import SegmentationConfig
 
-class SegmentationModel(object):
-    def __init__(self, config: Dict[str, Any]):
+
+class SegmentationModel:
+    def __init__(self, config: SegmentationConfig):
         """
         Initialize the SegmentationModel.
 
