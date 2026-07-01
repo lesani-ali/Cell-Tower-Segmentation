@@ -122,7 +122,7 @@ def _compute_ap_101(scores: np.ndarray, is_tp: np.ndarray, n_gt: int) -> float:
     return ap / 101.0
 
 
-class Eval:
+class SegmentationEvaluator:
     """
     COCO-style instance segmentation evaluator.
 
@@ -150,6 +150,11 @@ class Eval:
         # GT index: filename → {height, width, annotations[]}
         self._gt: Dict[str, dict] = {}
         self._load_gt()
+
+    @property
+    def processed(self) -> int:
+        """Number of images accumulated so far via `update()`."""
+        return self._processed
 
     def _load_gt(self) -> None:
         if not self.gt_path.exists():
