@@ -93,9 +93,7 @@ class DepthModel:
         depth = (depth - depth.min()) / (depth.max() - depth.min()) * 255.0
         depth = depth.cpu().numpy().astype(np.uint8)
 
-        if grayscale:
-            depth = np.repeat(depth[..., np.newaxis], 3, axis=-1)
-        else:
+        if not grayscale:
             depth = cv2.cvtColor(
                 cv2.applyColorMap(depth, cv2.COLORMAP_INFERNO), cv2.COLOR_BGR2RGB
             )

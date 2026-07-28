@@ -4,6 +4,7 @@ import numpy as np
 from groundingdino.util.inference import load_model, predict
 from torchvision.ops import box_convert
 import groundingdino.datasets.transforms as T
+from typing import Optional
 
 from ..config import ObjectDetectionConfig
 
@@ -26,7 +27,11 @@ class ObjectDetectionModel:
     def __call__(self, image: np.ndarray) -> np.ndarray:
         return self.predict(image)
 
-    def predict(self, image: np.ndarray) -> np.ndarray:
+    def predict(
+        self,
+        image: np.ndarray,
+        text_prompt: Optional[str] = None,
+    ) -> dict:
         """
         Predict the bounding boxes for the image.
 
@@ -36,19 +41,39 @@ class ObjectDetectionModel:
         h, w, _ = image.shape
         transformed_img = ObjectDetectionModel.preprocess(image)
 
-        boxes, logits, phrases = predict(
+        prompt = text_prompt
+        if prompt is None:
+            if not self.config.text_prompt:
+                raise ValueError("object_detection.text_prompt must be provided")
+            prompt = self.config.text_prompt
+
+        boxes, logits, _ = predict(
             model=self.model,
             image=transformed_img,
-            caption=self.config.text_prompt,
+            caption=prompt,
             box_threshold=self.config.box_threshold,
             text_threshold=self.config.text_threshold,
         )
 
-        boxes_xyxy = ObjectDetectionModel.post_process_result(
-            source_h=h, source_w=w, boxes=boxes
-        )
+        if len(boxes) == 0:
+            return {
+                "boxes": np.empty((0, 4), dtype=np.float32),
+                "scores": np.empty((0,), dtype=np.float32),
+                "prompts": [],
+            }
 
-        return {"boxes": boxes_xyxy, "scores": logits.numpy()}
+        boxes_xyxy = ObjectDetectionModel.post_process_result(
+            source_h=h,
+            source_w=w,
+            boxes=boxes,
+        )
+        scores = logits.detach().cpu().numpy().astype(np.float32)
+
+        return {
+            "boxes": boxes_xyxy.astype(np.float32),
+            "scores": scores,
+            "prompts": [prompt] * len(scores),
+        }
 
     @staticmethod
     def preprocess(img: Image.Image) -> torch.Tensor:
@@ -85,5 +110,5 @@ class ObjectDetectionModel:
         :return: Processed bounding boxes in xyxy format.
         """
         boxes = boxes * torch.Tensor([source_w, source_h, source_w, source_h])
-        xyxy = box_convert(boxes=boxes, in_fmt="cxcywh", out_fmt="xyxy").numpy()
+        xyxy = box_convert(boxes=boxes, in_fmt="cxcywh", out_fmt="xyxy").detach().cpu().numpy()
         return xyxy

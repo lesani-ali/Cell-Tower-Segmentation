@@ -34,6 +34,10 @@ class SegmentationModel:
         :return: Segmentation masks.
         """
         image = np.asarray(image)
+        if prompts is None or len(prompts) == 0:
+            height, width = image.shape[:2]
+            return np.empty((0, height, width), dtype=bool)
+
         self.model.set_image(image)
 
         result_masks = []

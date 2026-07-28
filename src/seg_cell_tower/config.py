@@ -22,6 +22,7 @@ class ObjectDetectionConfig(BaseModel):
     text_prompt: str = "small bright rectangles attached to tower"
     box_threshold: float = Field(ge=0.0, le=1.0, default=0.14)
     text_threshold: float = Field(ge=0.0, le=1.0, default=0.25)
+    nms_threshold: float = Field(ge=0.0, le=1.0, default=0.5)
     device: str = "cuda:0"
 
 

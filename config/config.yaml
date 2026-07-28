@@ -9,7 +9,8 @@ models:
   object_detection:
     ckpt: "./ckpts/groundingdino_swint_ogc.pth"
     config_path: "./src/seg_cell_tower/third_party_models/GroundingDINO/groundingdino/config/GroundingDINO_SwinT_OGC.py"
-    text_prompt: "small bright rectangles attached to tower" # Input text prompt for multi modal object detection
+    text_prompt: "small bright rectangles attached to tower"
+    nms_threshold: 0.5 # Inputs to object detection model
     box_threshold: 0.14 # Inputs to object detection model
     text_threshold: 0.25 # Inputs to object detection model
     device: "cuda:0"
@@ -20,11 +21,10 @@ models:
 
 
 recover_info_threshold: 140 # This is a depth threshold: Any pixel having depth value greater than this threshold will be considered as recoverable information
-ignore_info_threshold: 80 # This is a depth threshold: Any pixel having depth value greater than this threshold will be considered as recoverable information
+ignore_info_threshold: 80 # This is a depth threshold: Any pixel having depth value less than this threshold will be ignored
 
 
 log_dir: "./logs/log.txt"
-
 
 
 

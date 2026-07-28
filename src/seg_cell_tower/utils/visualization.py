@@ -29,6 +29,6 @@ def get_mask_img(masks, random_color=False):
             rgb_mask[mask] = color_mask
     else:
         for mask in masks:
-            color_mask = np.array([30 / 255, 144 / 255, 255 / 255, 0.35])
+            color_mask = np.array([255 / 255, 51 / 255, 153 / 255, 0.35])
             rgb_mask[mask] = color_mask
     return rgb_mask

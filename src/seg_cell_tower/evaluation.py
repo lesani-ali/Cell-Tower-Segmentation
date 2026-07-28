@@ -6,7 +6,7 @@ from typing import Dict, List, Optional, Tuple
 import cv2
 import numpy as np
 
-from ..logging import get_logger
+from .logging import get_logger
 
 logger = get_logger(__name__)
 

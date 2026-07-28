@@ -1,5 +1,5 @@
 import os
-from typing import Optional
+from typing import Optional, Tuple
 
 import numpy as np
 from PIL import Image
@@ -14,7 +14,12 @@ from .models import (
     SaliencyDetectionModel,
     SegmentationModel,
 )
-from .postprocessing import add_missed_info, post_process_boxes
+from .postprocessing import (
+    build_tower_prior,
+    get_roi_box,
+    offset_boxes,
+    post_process_boxes,
+)
 from .utils.io import load_image
 from .utils.visualization import combine_image_with_mask, get_mask_img
 
@@ -40,6 +45,36 @@ class SegmentationPipeline:
 
         self.config = config
 
+    def _detect_candidates(
+        self,
+        image: Image.Image,
+        crop_box: Tuple[int, int, int, int],
+    ) -> dict:
+        image_arr = np.asarray(image)
+        x1, y1, x2, y2 = crop_box
+        crop = image_arr[y1:y2, x1:x2]
+
+        if crop.size == 0:
+            return {
+                "boxes": np.empty((0, 4), dtype=np.float32),
+                "scores": np.empty((0,), dtype=np.float32),
+                "prompts": [],
+            }
+
+        detections = self.object_detection_model(crop)
+        if len(detections["boxes"]) == 0:
+            return {
+                "boxes": np.empty((0, 4), dtype=np.float32),
+                "scores": np.empty((0,), dtype=np.float32),
+                "prompts": [],
+            }
+
+        return {
+            "boxes": offset_boxes(detections["boxes"], crop_box).astype(np.float32),
+            "scores": detections["scores"].astype(np.float32),
+            "prompts": detections.get("prompts", []),
+        }
+
     def __call__(self, image: Image.Image) -> dict:
         return self.predict(image)
 
@@ -56,35 +91,31 @@ class SegmentationPipeline:
                 scores : np.ndarray (N,) float — detection confidence per mask.
         """
         image_height = image.height
+        image_width = image.width
 
-        # Step 1: Saliency detection — remove background
+        # Step 1: Saliency and depth produce a coarse tower prior.
         saliency_img = self.saliency_model(image)
-
-        # Step 2: Depth estimation
         depth_map = self.depth_model(image)
-
-        # Step 3: Recover missed foreground information using depth
-        no_background_img = add_missed_info(
-            depth_map,
-            saliency_img,
-            image,
-            self.config.recover_info_threshold,
+        tower_prior, saliency_mask = build_tower_prior(
+            depth_map=depth_map,
+            saliency_img=saliency_img,
+            recover_threshold=self.config.recover_info_threshold,
         )
 
-        # Step 4: Detect antenna bounding boxes
-        results = self.object_detection_model(no_background_img)
+        # Step 2: Detect on original-image tower crops to keep the image natural.
+        tower_roi = get_roi_box(tower_prior)
+        results = self._detect_candidates(image, tower_roi)
 
-        # Step 5: Filter spurious / oversized / far-away boxes
+        # Step 3: Re-score detections with tower-aware priors.
         results = post_process_boxes(
             results,
-            image_height,
-            depth_map,
-            large_box_threshold=0.4,
-            iou_threshold=0.5,
-            farther_object_threshold=70,
+            image_shape=(image_height, image_width),
+            depth_map=depth_map,
+            nms_threshold=self.config.models.object_detection.nms_threshold,
+            ignore_threshold=self.config.ignore_info_threshold,
         )
 
-        # Step 6: SAM segmentation prompt by box
+        # Step 4: Segment each surviving box with SAM.
         masks = self.segmentation_model(image, results["boxes"])
 
         return {"masks": masks, "scores": results["scores"]}
@@ -127,16 +158,23 @@ class SegmentationPipeline:
             output = self(in_img)
 
             # Build combined mask image (H×W, values 0 or 255)
-            rgb_mask = get_mask_img(output["masks"], random_color=False)
-            output_mask = Image.fromarray((rgb_mask * 255).astype(np.uint8))
-
+            if len(output["masks"]) == 0:
+                mask = Image.fromarray(
+                    np.zeros((in_img.height, in_img.width, 4), dtype=np.uint8)
+                )
+                output_mask = mask.convert("RGB")
+            else:
+                rgb_mask = get_mask_img(output["masks"], random_color=False)
+                mask = Image.fromarray((rgb_mask * 255).astype(np.uint8))
+                output_mask = mask.convert("RGB")
+    
             # Save mask
             mask_path = os.path.join(output_mask_dir, base_name + ".png")
             output_mask.save(mask_path)
             logger.info(f"Saved mask: {mask_path}")
 
             # Save overlay image
-            overlay = combine_image_with_mask(in_img, output_mask)
+            overlay = combine_image_with_mask(in_img, mask)
             overlay_path = os.path.join(output_img_dir, base_name + ".png")
             overlay.save(overlay_path)
             logger.info(f"Saved overlay: {overlay_path}")
