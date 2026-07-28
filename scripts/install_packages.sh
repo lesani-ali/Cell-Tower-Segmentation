@@ -38,7 +38,9 @@ if [ "$CPU_ONLY" = true ]; then
     pip install -e .
 else
     echo "Installing main package (GPU version with CUDA 11.8)..."
-    pip install -e . --extra-index-url https://download.pytorch.org/whl/cu118
+    pip install torch==2.4.1 torchvision==0.19.1 --index-url https://download.pytorch.org/whl/cu118
+
+    pip install -e .
 fi
 
 echo ""
